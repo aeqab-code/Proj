@@ -1,0 +1,97 @@
+groovy
+pipeline {
+    agent any
+    environment {
+        IMAGE_NAME = 'motoride-app'
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/aeqab-code/Proj.git'
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'DOCKER_CREDENTIALS', 
+                        usernameVariable: 'DOCKER_USERNAME', 
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
+                        sh """
+                            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                            docker build -t $DOCKER_USERNAME/$IMAGE_NAME:latest .
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'DOCKER_CREDENTIALS', 
+                        usernameVariable: 'DOCKER_USERNAME', 
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
+                        sh """
+                            docker push $DOCKER_USERNAME/$IMAGE_NAME:latest
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Server') {
+            steps {
+                script {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'DOCKER_CREDENTIALS', 
+                            usernameVariable: 'DOCKER_USERNAME', 
+                            passwordVariable: 'DOCKER_PASSWORD'
+                        ),
+                        sshUserPrivateKey(
+                            credentialsId: 'SERVER_SSH_KEY', 
+                            keyFileVariable: 'SSH_KEY', 
+                            usernameVariable: 'SERVER_USER'
+                        )
+                    ]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -i $SSH_KEY $SERVER_USER@$SERVER_IP '
+                                docker stop $IMAGE_NAME || true
+                                docker rm $IMAGE_NAME || true
+                                echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                                docker pull $DOCKER_USERNAME/$IMAGE_NAME:latest
+                                docker run -d --name $IMAGE_NAME -p 80:80 --restart unless-stopped $DOCKER_USERNAME/$IMAGE_NAME:latest
+                            '
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            sh 'docker logout || true'
+        }
+        success {
+            echo 
+        }
+        failure {
+            echo 
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
